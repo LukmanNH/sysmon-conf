@@ -1,0 +1,158 @@
+<!--
+  Sysmon Configuration - Named Pipe Monitoring Focus
+  ===================================================
+  Purpose : Cover Pipe Creation (EID 17) & Pipe Connection (EID 18) gaps
+            not natively covered by Elastic Agent/EDR.
+  Base    : Adapted from SwiftOnSecurity + Olaf Hartong references.
+  Version : 1.0
+  Date    : 2026-03-26
+
+  NOTES:
+  - This config focuses on Named Pipe events but also includes
+    essential baseline telemetry (process create, network, etc.)
+    that complements Elastic Agent (no duplication harm).
+  - Tune the PipeEvent exclusions based on YOUR environment after
+    running a 1-2 week baseline.
+  - Named pipes are key for detecting: Cobalt Strike, Metasploit,
+    PsExec, lateral movement via SMB, priv-esc via rogue pipes.
+-->
+<Sysmon schemaversion="4.90">
+
+    <HashAlgorithms>md5,sha256,imphash</HashAlgorithms>
+    <CheckRevocation>false</CheckRevocation>
+
+    <EventFiltering>
+
+        <!-- ============================================================ -->
+        <!-- EVENT ID 17: PIPE CREATED (Server-side pipe creation)        -->
+        <!-- ============================================================ -->
+        <RuleGroup name="PipeCreated" groupRelation="or">
+            <PipeEvent onmatch="exclude">
+                <!-- Windows built-in / common legitimate pipes -->
+                <PipeName condition="is">\wkssvc</PipeName>
+                <PipeName condition="is">\srvsvc</PipeName>
+                <PipeName condition="is">\lsass</PipeName>
+                <PipeName condition="is">\winreg</PipeName>
+                <PipeName condition="is">\spoolss</PipeName>
+                <PipeName condition="is">\netlogon</PipeName>
+                <PipeName condition="is">\samr</PipeName>
+                <PipeName condition="is">\atsvc</PipeName>
+                <PipeName condition="is">\epmapper</PipeName>
+                <PipeName condition="is">\svcctl</PipeName>
+                <PipeName condition="is">\lsarpc</PipeName>
+                <PipeName condition="is">\wkssvc</PipeName>
+                <PipeName condition="is">\browser</PipeName>
+
+                <!-- Chrome / Edge / Chromium-based browsers (very noisy) -->
+                <PipeName condition="begin with">\mojo.</PipeName>
+                <PipeName condition="begin with">\chromium.</PipeName>
+                <PipeName condition="begin with">\chrome.</PipeName>
+                <PipeName condition="begin with">\crashpad_</PipeName>
+                <PipeName condition="begin with">\msedge.</PipeName>
+                <PipeName condition="begin with">\gecko-crash</PipeName>
+
+                <!-- Visual Studio / .NET / Dev tools -->
+                <PipeName condition="begin with">\dotnet-diagnostic-</PipeName>
+                <PipeName condition="begin with">\PSHost.</PipeName>
+
+                <!-- SQL Server -->
+                <PipeName condition="begin with">\sql\</PipeName>
+                <PipeName condition="is">\SQLLocal\MSSQLSERVER</PipeName>
+
+                <!-- Elastic Agent's own pipes (avoid self-noise) -->
+                <PipeName condition="begin with">\elastic</PipeName>
+
+                <!--
+                ============================================================
+                ADD YOUR ENVIRONMENT-SPECIFIC EXCLUSIONS BELOW
+                After 1-2 weeks of baseline, check noisy PipeNames:
+
+                  KQL in Kibana:
+                  event.code: "17" | stats count by file.name | sort -count
+
+                Then add them here.
+                ============================================================
+                -->
+
+            </PipeEvent>
+        </RuleGroup>
+
+        <!-- ============================================================ -->
+        <!-- EVENT ID 18: PIPE CONNECTED (Client connecting to a pipe)    -->
+        <!-- ============================================================ -->
+        <RuleGroup name="PipeConnected" groupRelation="or">
+            <PipeEvent onmatch="exclude">
+                <!-- Same noisy pipes as above -->
+                <PipeName condition="begin with">\mojo.</PipeName>
+                <PipeName condition="begin with">\chromium.</PipeName>
+                <PipeName condition="begin with">\chrome.</PipeName>
+                <PipeName condition="begin with">\crashpad_</PipeName>
+                <PipeName condition="begin with">\msedge.</PipeName>
+                <PipeName condition="begin with">\gecko-crash</PipeName>
+                <PipeName condition="begin with">\dotnet-diagnostic-</PipeName>
+                <PipeName condition="begin with">\PSHost.</PipeName>
+                <PipeName condition="begin with">\sql\</PipeName>
+                <PipeName condition="begin with">\elastic</PipeName>
+            </PipeEvent>
+        </RuleGroup>
+
+        <!-- ============================================================ -->
+        <!-- PROCESS CREATION (EID 1) - Minimal baseline                  -->
+        <!-- Elastic Agent covers this well, but Sysmon adds ParentUser,  -->
+        <!-- hashes, and IMPHASH which can complement.                    -->
+        <!-- ============================================================ -->
+        <RuleGroup name="ProcessCreate" groupRelation="or">
+            <ProcessCreate onmatch="exclude">
+                <Image condition="is">C:\Windows\System32\SearchFilterHost.exe</Image>
+                <Image condition="is">C:\Windows\System32\SearchProtocolHost.exe</Image>
+                <Image condition="is">C:\Windows\System32\backgroundTaskHost.exe</Image>
+            </ProcessCreate>
+        </RuleGroup>
+
+        <!-- ============================================================ -->
+        <!-- Disable high-volume events we don't need from Sysmon         -->
+        <!-- ============================================================ -->
+
+        <!-- EID 3: Network Connection - Let Elastic handle this -->
+        <RuleGroup name="NetworkConnect" groupRelation="or">
+            <NetworkConnect onmatch="include" />
+        </RuleGroup>
+
+        <!-- EID 7: Image Loaded - Very noisy, Elastic covers it -->
+        <RuleGroup name="ImageLoad" groupRelation="or">
+            <ImageLoad onmatch="include" />
+        </RuleGroup>
+
+        <!-- EID 9: Raw Access Read - Rarely needed -->
+        <RuleGroup name="RawAccessRead" groupRelation="or">
+            <RawAccessRead onmatch="include" />
+        </RuleGroup>
+
+        <!-- EID 10: Process Access - Let Elastic handle -->
+        <RuleGroup name="ProcessAccess" groupRelation="or">
+            <ProcessAccess onmatch="include" />
+        </RuleGroup>
+
+        <!-- EID 11: File Create - Let Elastic handle -->
+        <RuleGroup name="FileCreate" groupRelation="or">
+            <FileCreate onmatch="include" />
+        </RuleGroup>
+
+        <!-- EID 12,13,14: Registry - Let Elastic handle -->
+        <RuleGroup name="RegistryEvent" groupRelation="or">
+            <RegistryEvent onmatch="include" />
+        </RuleGroup>
+
+        <!-- EID 15: FileCreateStreamHash - Alternate Data Streams -->
+        <!-- Keep this - useful for ADS-based attacks, low volume -->
+        <RuleGroup name="FileCreateStreamHash" groupRelation="or">
+            <FileCreateStreamHash onmatch="exclude" />
+        </RuleGroup>
+
+        <!-- EID 22: DNS Query - Let Elastic handle -->
+        <RuleGroup name="DnsQuery" groupRelation="or">
+            <DnsQuery onmatch="include" />
+        </RuleGroup>
+
+    </EventFiltering>
+</Sysmon>
